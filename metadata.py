@@ -336,6 +336,18 @@ class DotNetMetadata:
                 return m
         return None
 
+    def resolve_token_address(self, token):
+        """
+        Address to navigate to for a token, or None if it has no local target.
+        Only MethodDef tokens with a body map to a function in this view; the
+        function entry is rva + body-header size (image_base is 0 here).
+        """
+        if token_table(token) == Table.MethodDef:
+            m = self._method_by_token.get(token)
+            if m and m.rva:
+                return self.image_base + m.rva + m.code_offset
+        return None
+
     def resolve_token(self, token):
         tbl, row = token_table(token), token_row(token)
         if tbl == Table.UserString:

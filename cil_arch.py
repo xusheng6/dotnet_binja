@@ -246,8 +246,18 @@ class CILArchitecture(Architecture):
             token = struct.unpack("<I", operand)[0]
             md = self._md()
             label = md.resolve_token(token) if md else f"token_{token:08x}"
+            target = md.resolve_token_address(token) if md else None
             space()
-            toks.append(InstructionTextToken(T.CodeRelativeAddressToken, label, token))
+            if target is not None:
+                # Local method: navigable token pointing at the function. Binary
+                # Ninja renders it as the function's symbol and double-click
+                # navigates there.
+                toks.append(InstructionTextToken(T.PossibleAddressToken,
+                                                 label, target))
+            else:
+                # External member / string / type: no local address, so keep it
+                # as plain text (double-click must not jump to a bogus token).
+                toks.append(InstructionTextToken(T.TextToken, label))
         elif kind in ("i", "ishort", "var", "varshort"):
             fmt = "<i" if kind == "i" else ("<b" if kind in ("ishort", "varshort") else "<h")
             if kind == "var":
