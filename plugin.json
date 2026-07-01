@@ -1,0 +1,16 @@
+{
+  "pluginmetadataversion": 2,
+  "name": "dotnet_binja",
+  "type": ["architecture", "binaryview"],
+  "api": ["python3"],
+  "description": "Standalone Binary Ninja plugin scaffold: CIL architecture + .NET (CLI) binary view.",
+  "longdescription": "Decodes and lifts CIL/MSIL and lays out .NET assembly method bodies as functions by parsing ECMA-335 metadata. Skeleton — metadata parsing and full opcode coverage are TODO.",
+  "license": { "name": "MIT" },
+  "platforms": ["Darwin", "Linux", "Windows"],
+  "installinstructions": {
+    "Darwin": "Symlink or copy this directory into ~/Library/Application Support/Binary Ninja/plugins/",
+    "Linux": "Symlink or copy this directory into ~/.binaryninja/plugins/",
+    "Windows": "Copy this directory into %APPDATA%/Binary Ninja/plugins/"
+  },
+  "version": "0.0.1"
+}
