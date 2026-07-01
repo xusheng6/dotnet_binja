@@ -157,6 +157,7 @@ class DotNetMetadata:
     _method_by_token: dict = field(default_factory=dict)
     _typerefs: dict = field(default_factory=dict)   # row -> "NS.Type"
     _memberrefs: dict = field(default_factory=dict)  # row -> "NS.Type::name"
+    _fields: dict = field(default_factory=dict)      # row -> "NS.Type::name"
     _us_off: int = 0
     _data: bytes = b""
 
@@ -293,17 +294,30 @@ class DotNetMetadata:
             name = get_string(name_idx)
             self._memberrefs[i] = f"{owner}::{name}" if owner else name
 
-        # TypeDef method ranges -> map each method row to its declaring type.
+        # TypeDef ranges -> map each method/field row to its declaring type.
+        # TypeDef cols: [Flags, Name, Namespace, Extends, FieldList, MethodList]
         typedefs = rows_by_table.get(Table.TypeDef, [])
         methoddefs = rows_by_table.get(Table.MethodDef, [])
+        fielddefs = rows_by_table.get(Table.Field, [])
         method_type = {}
+        field_type = {}
         for ti, tr in enumerate(typedefs):
-            start = tr[5]
-            end = typedefs[ti + 1][5] if ti + 1 < len(typedefs) else len(methoddefs) + 1
             ns, name = get_string(tr[2]), get_string(tr[1])
             tfull = f"{ns}.{name}" if ns else name
-            for mrow in range(start, end):
+            m_start = tr[5]
+            m_end = typedefs[ti + 1][5] if ti + 1 < len(typedefs) else len(methoddefs) + 1
+            for mrow in range(m_start, m_end):
                 method_type[mrow] = tfull
+            f_start = tr[4]
+            f_end = typedefs[ti + 1][4] if ti + 1 < len(typedefs) else len(fielddefs) + 1
+            for frow in range(f_start, f_end):
+                field_type[frow] = tfull
+
+        # Field (0x04) -> "Type::name"  (Field cols: [Flags, Name, Signature])
+        for i, r in enumerate(fielddefs, start=1):
+            tfull = field_type.get(i)
+            fname = get_string(r[1])
+            self._fields[i] = f"{tfull}::{fname}" if tfull else fname
 
         # MethodDef -> Method (+ body header parse)
         for i, r in enumerate(methoddefs, start=1):
@@ -358,6 +372,8 @@ class DotNetMetadata:
                 return m.name
         if tbl == Table.MemberRef:
             return self._memberrefs.get(row, f"memberref_{row}")
+        if tbl == Table.Field:
+            return self._fields.get(row, f"field_{row}")
         if tbl == Table.TypeRef:
             return self._typerefs.get(row, f"typeref_{row}")
         if tbl == Table.TypeDef:
