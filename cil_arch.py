@@ -249,10 +249,12 @@ class CILArchitecture(Architecture):
             target = md.resolve_token_address(token) if md else None
             space()
             if target is not None:
-                # Local method: navigable token pointing at the function. Binary
-                # Ninja renders it as the function's symbol and double-click
-                # navigates there.
-                toks.append(InstructionTextToken(T.PossibleAddressToken,
+                # Local method: a function symbol exists at `target`, so emit a
+                # CodeSymbolToken directly. This is the navigable token type the
+                # GUI honors on double-click (PossibleAddressToken/
+                # CodeRelativeAddressToken render a hover preview but the GUI's
+                # interactive token stays non-navigable).
+                toks.append(InstructionTextToken(T.CodeSymbolToken,
                                                  label, target))
             else:
                 # External member / string / type: no local address, so keep it
