@@ -24,10 +24,22 @@ class Table:
     Field = 0x04
     MethodDef = 0x06
     Param = 0x08
+    InterfaceImpl = 0x09
     MemberRef = 0x0A
+    DeclSecurity = 0x0E
+    StandAloneSig = 0x11
+    Event = 0x14
+    Property = 0x17
     ModuleRef = 0x1A
     TypeSpec = 0x1B
+    Assembly = 0x20
     AssemblyRef = 0x23
+    File = 0x26
+    ExportedType = 0x27
+    ManifestResource = 0x28
+    GenericParam = 0x2A
+    MethodSpec = 0x2B
+    GenericParamConstraint = 0x2C
     UserString = 0x70    # ldstr operands index the "#US" heap with this prefix
 
 
@@ -66,34 +78,86 @@ def read_compressed_uint(d, o):
     return (((b & 0x1F) << 24) | (d[o + 1] << 16) | (d[o + 2] << 8) | d[o + 3]), o + 4
 
 
-# ---- coded-index definitions (tables referenced, tag-bit count) ------------
+# ---- coded-index definitions (referenced tables, tag-bit count) ------------
+# 0xFF marks an unused tag slot (its row count is treated as 0 for sizing).
 CODED = {
-    "TypeDefOrRef":    ([Table.TypeDef, Table.TypeRef, Table.TypeSpec], 2),
-    "ResolutionScope": ([Table.Module, Table.ModuleRef, Table.AssemblyRef, Table.TypeRef], 2),
-    "MemberRefParent": ([Table.TypeDef, Table.TypeRef, Table.ModuleRef,
-                         Table.MethodDef, Table.TypeSpec], 3),
+    "TypeDefOrRef":    ([0x02, 0x01, 0x1B], 2),
+    "HasConstant":     ([0x04, 0x08, 0x17], 2),
+    "HasCustomAttribute": ([0x06, 0x04, 0x01, 0x02, 0x08, 0x09, 0x0A, 0x00,
+                            0x0E, 0x17, 0x14, 0x11, 0x1A, 0x1B, 0x20, 0x23,
+                            0x26, 0x27, 0x28, 0x2A, 0x2C, 0x2B], 5),
+    "HasFieldMarshal": ([0x04, 0x08], 1),
+    "HasDeclSecurity": ([0x02, 0x06, 0x20], 2),
+    "MemberRefParent": ([0x02, 0x01, 0x1A, 0x06, 0x1B], 3),
+    "HasSemantics":    ([0x14, 0x17], 1),
+    "MethodDefOrRef":  ([0x06, 0x0A], 1),
+    "MemberForwarded": ([0x04, 0x06], 1),
+    "Implementation":  ([0x26, 0x23, 0x27], 2),
+    "CustomAttributeType": ([0xFF, 0xFF, 0x06, 0x0A, 0xFF], 3),
+    "ResolutionScope": ([0x00, 0x1A, 0x23, 0x01], 2),
+    "TypeOrMethodDef": ([0x02, 0x06], 1),
 }
 
-# Row schemas for tables 0x00..0x0A. Column kinds:
+# Row schemas for every metadata table (ECMA-335 II.22). Column kinds:
 #   'u16','u32'                       fixed ints
 #   'string','guid','blob'            heap indexes (size from heapSizes byte)
 #   ('idx', table_id)                 simple index into one table
 #   ('coded', name)                   coded index (see CODED)
+T = Table
 SCHEMAS = {
     0x00: ["u16", "string", "guid", "guid", "guid"],                       # Module
-    0x01: [("coded", "ResolutionScope"), "string", "string"],             # TypeRef
+    0x01: [("coded", "ResolutionScope"), "string", "string"],              # TypeRef
     0x02: ["u32", "string", "string", ("coded", "TypeDefOrRef"),
-           ("idx", Table.Field), ("idx", Table.MethodDef)],               # TypeDef
-    0x03: [("idx", Table.Field)],                                          # FieldPtr
+           ("idx", T.Field), ("idx", T.MethodDef)],                        # TypeDef
+    0x03: [("idx", T.Field)],                                              # FieldPtr
     0x04: ["u16", "string", "blob"],                                       # Field
-    0x05: [("idx", Table.MethodDef)],                                      # MethodPtr
-    0x06: ["u32", "u16", "u16", "string", "blob", ("idx", Table.Param)],   # MethodDef
-    0x07: [("idx", Table.Param)],                                          # ParamPtr
+    0x05: [("idx", T.MethodDef)],                                          # MethodPtr
+    0x06: ["u32", "u16", "u16", "string", "blob", ("idx", T.Param)],       # MethodDef
+    0x07: [("idx", T.Param)],                                              # ParamPtr
     0x08: ["u16", "u16", "string"],                                        # Param
-    0x09: [("idx", Table.TypeDef), ("coded", "TypeDefOrRef")],            # InterfaceImpl
-    0x0A: [("coded", "MemberRefParent"), "string", "blob"],               # MemberRef
+    0x09: [("idx", T.TypeDef), ("coded", "TypeDefOrRef")],                 # InterfaceImpl
+    0x0A: [("coded", "MemberRefParent"), "string", "blob"],                # MemberRef
+    0x0B: ["u16", ("coded", "HasConstant"), "blob"],                       # Constant
+    0x0C: [("coded", "HasCustomAttribute"),
+           ("coded", "CustomAttributeType"), "blob"],                      # CustomAttribute
+    0x0D: [("coded", "HasFieldMarshal"), "blob"],                          # FieldMarshal
+    0x0E: ["u16", ("coded", "HasDeclSecurity"), "blob"],                   # DeclSecurity
+    0x0F: ["u16", "u32", ("idx", T.TypeDef)],                              # ClassLayout
+    0x10: ["u32", ("idx", T.Field)],                                       # FieldLayout
+    0x11: ["blob"],                                                        # StandAloneSig
+    0x12: [("idx", T.TypeDef), ("idx", T.Event)],                          # EventMap
+    0x13: [("idx", T.Event)],                                              # EventPtr
+    0x14: ["u16", "string", ("coded", "TypeDefOrRef")],                    # Event
+    0x15: [("idx", T.TypeDef), ("idx", T.Property)],                       # PropertyMap
+    0x16: [("idx", T.Property)],                                           # PropertyPtr
+    0x17: ["u16", "string", "blob"],                                       # Property
+    0x18: ["u16", ("idx", T.MethodDef), ("coded", "HasSemantics")],        # MethodSemantics
+    0x19: [("idx", T.TypeDef), ("coded", "MethodDefOrRef"),
+           ("coded", "MethodDefOrRef")],                                   # MethodImpl
+    0x1A: ["string"],                                                      # ModuleRef
+    0x1B: ["blob"],                                                        # TypeSpec
+    0x1C: ["u16", ("coded", "MemberForwarded"), "string",
+           ("idx", T.ModuleRef)],                                          # ImplMap
+    0x1D: ["u32", ("idx", T.Field)],                                       # FieldRVA
+    0x1E: ["u32", "u32"],                                                  # ENCLog
+    0x1F: ["u32"],                                                         # ENCMap
+    0x20: ["u32", "u16", "u16", "u16", "u16", "u32",
+           "blob", "string", "string"],                                    # Assembly
+    0x21: ["u32"],                                                         # AssemblyProcessor
+    0x22: ["u32", "u32", "u32"],                                           # AssemblyOS
+    0x23: ["u16", "u16", "u16", "u16", "u32",
+           "blob", "string", "string", "blob"],                           # AssemblyRef
+    0x24: ["u32", ("idx", T.AssemblyRef)],                                 # AssemblyRefProcessor
+    0x25: ["u32", "u32", "u32", ("idx", T.AssemblyRef)],                   # AssemblyRefOS
+    0x26: ["u32", "string", "blob"],                                       # File
+    0x27: ["u32", "u32", "string", "string", ("coded", "Implementation")], # ExportedType
+    0x28: ["u32", "u32", "string", ("coded", "Implementation")],           # ManifestResource
+    0x29: [("idx", T.TypeDef), ("idx", T.TypeDef)],                        # NestedClass
+    0x2A: ["u16", "u16", ("coded", "TypeOrMethodDef"), "string"],          # GenericParam
+    0x2B: [("coded", "MethodDefOrRef"), "blob"],                           # MethodSpec
+    0x2C: [("idx", T.GenericParam), ("coded", "TypeDefOrRef")],            # GenericParamConstraint
 }
-LAST_TABLE = 0x0A
+LAST_TABLE = 0x2C
 
 
 @dataclass
@@ -155,9 +219,12 @@ class DotNetMetadata:
     methods: list = field(default_factory=list)
     segments: list = field(default_factory=list)   # (va, vsize, praw, sraw, chars)
     _method_by_token: dict = field(default_factory=dict)
-    _typerefs: dict = field(default_factory=dict)   # row -> "NS.Type"
-    _memberrefs: dict = field(default_factory=dict)  # row -> "NS.Type::name"
-    _fields: dict = field(default_factory=dict)      # row -> "NS.Type::name"
+    _typedefs: dict = field(default_factory=dict)    # row -> "NS.Type"
+    _typerefs: dict = field(default_factory=dict)    # row -> "NS.Type"
+    _typespecs: dict = field(default_factory=dict)   # row -> "Type<...>"
+    _memberrefs: dict = field(default_factory=dict)  # row -> "Type::name"
+    _fields: dict = field(default_factory=dict)      # row -> "Type::name"
+    _methodspecs: dict = field(default_factory=dict)  # row -> "method<...>"
     _us_off: int = 0
     _data: bytes = b""
 
@@ -204,6 +271,7 @@ class DotNetMetadata:
             p = name_start + padded
 
         strings_off = streams.get("#Strings", (0, 0))[0]
+        blob_off = streams.get("#Blob", (0, 0))[0]
         self._us_off = streams.get("#US", (0, 0))[0]
 
         def get_string(idx):
@@ -212,6 +280,12 @@ class DotNetMetadata:
             s = strings_off + idx
             end = data.index(b"\x00", s)
             return data[s:end].decode("utf-8", "replace")
+
+        def get_blob(idx):
+            if not idx or not blob_off:
+                return b""
+            n, p2 = read_compressed_uint(data, blob_off + idx)
+            return data[p2:p2 + n]
 
         # table stream ("#~" compressed, "#-" uncompressed)
         tstream = streams.get("#~") or streams.get("#-")
@@ -257,7 +331,8 @@ class DotNetMetadata:
                 return coded_size(kind[1])
             raise ValueError(kind)
 
-        # Parse tables 0x00..0x0A sequentially.
+        # Parse every metadata table sequentially (table N's offset depends on
+        # the exact size of all tables before it, so we must walk them in order).
         rows_by_table = {}
         p = tables_start
         for tid in range(0, LAST_TABLE + 1):
@@ -281,16 +356,87 @@ class DotNetMetadata:
             ns, name = get_string(r[2]), get_string(r[1])
             self._typerefs[i] = f"{ns}.{name}" if ns else name
 
-        # MemberRef -> "Owner::name" (owner resolved via MemberRefParent)
-        _, mrp_bits = CODED["MemberRefParent"]
-        mrp_tables = CODED["MemberRefParent"][0]
+        # TypeDef -> "NS.Type"  (needed for signature decoding below)
+        for i, r in enumerate(rows_by_table.get(Table.TypeDef, []), start=1):
+            ns, name = get_string(r[2]), get_string(r[1])
+            self._typedefs[i] = f"{ns}.{name}" if ns else name
+
+        # ---- type-signature decoder (ECMA-335 II.23.2.12) -----------------
+        # Renders TypeSpec blobs and generic arguments, e.g. GENERICINST over
+        # ReadOnlySpan`1<Byte> -> "System.ReadOnlySpan<byte>".
+        PRIM = {
+            0x01: "void", 0x02: "bool", 0x03: "char", 0x04: "sbyte",
+            0x05: "byte", 0x06: "short", 0x07: "ushort", 0x08: "int",
+            0x09: "uint", 0x0A: "long", 0x0B: "ulong", 0x0C: "float",
+            0x0D: "double", 0x0E: "string", 0x16: "typedref",
+            0x18: "IntPtr", 0x19: "UIntPtr", 0x1C: "object",
+        }
+
+        def type_name_tdr(coded):
+            tag, r = coded & 3, coded >> 2
+            if tag == 0:
+                return self._typedefs.get(r, f"typedef_{r}")
+            if tag == 1:
+                return self._typerefs.get(r, f"typeref_{r}")
+            if tag == 2:
+                return self._typespecs.get(r, f"typespec_{r}")
+            return f"tdr_{coded}"
+
+        def decode_type(b, p, depth=0):
+            if p >= len(b) or depth > 12:
+                return "?", p
+            et = b[p]
+            p += 1
+            if et in PRIM:
+                return PRIM[et], p
+            if et in (0x11, 0x12):                 # VALUETYPE / CLASS
+                tok, p = read_compressed_uint(b, p)
+                return type_name_tdr(tok), p
+            if et == 0x1D:                         # SZARRAY
+                inner, p = decode_type(b, p, depth + 1)
+                return inner + "[]", p
+            if et in (0x0F, 0x10):                 # PTR / BYREF
+                inner, p = decode_type(b, p, depth + 1)
+                return inner + ("*" if et == 0x0F else "&"), p
+            if et == 0x13:                         # VAR (class generic param)
+                n, p = read_compressed_uint(b, p)
+                return f"!{n}", p
+            if et == 0x1E:                         # MVAR (method generic param)
+                n, p = read_compressed_uint(b, p)
+                return f"!!{n}", p
+            if et == 0x15:                         # GENERICINST
+                p += 1                             # CLASS/VALUETYPE marker
+                tok, p = read_compressed_uint(b, p)
+                base = type_name_tdr(tok).split("`")[0]
+                argc, p = read_compressed_uint(b, p)
+                args = []
+                for _ in range(argc):
+                    a, p = decode_type(b, p, depth + 1)
+                    args.append(a)
+                return f"{base}<{', '.join(args)}>", p
+            return f"et_{et:02x}", p
+
+        # TypeSpec (0x1B) -> decoded type name
+        for i, r in enumerate(rows_by_table.get(Table.TypeSpec, []), start=1):
+            name, _ = decode_type(get_blob(r[0]), 0)
+            self._typespecs[i] = name
+
+        # MemberRef -> "Owner::name" (owner via MemberRefParent: TypeRef/
+        # TypeDef/TypeSpec are the ones that name a type).
+        mrp_tables, mrp_bits = CODED["MemberRefParent"]
         for i, r in enumerate(rows_by_table.get(Table.MemberRef, []), start=1):
             cls_val, name_idx = r[0], r[1]
             tag = cls_val & ((1 << mrp_bits) - 1)
             row = cls_val >> mrp_bits
             owner = ""
-            if tag < len(mrp_tables) and mrp_tables[tag] == Table.TypeRef:
-                owner = self._typerefs.get(row, "")
+            if tag < len(mrp_tables):
+                pt = mrp_tables[tag]
+                if pt == Table.TypeRef:
+                    owner = self._typerefs.get(row, "")
+                elif pt == Table.TypeDef:
+                    owner = self._typedefs.get(row, "")
+                elif pt == Table.TypeSpec:
+                    owner = self._typespecs.get(row, "")
             name = get_string(name_idx)
             self._memberrefs[i] = f"{owner}::{name}" if owner else name
 
@@ -343,6 +489,31 @@ class DotNetMetadata:
             if em and em.rva:
                 self.entry_point = em.rva + em.code_offset
 
+        # MethodSpec (0x2B) -> "method<T, ...>"  (generic method instantiation).
+        # Cols: [Method (MethodDefOrRef coded), Instantiation (blob)].
+        mdor_tables, mdor_bits = CODED["MethodDefOrRef"]
+        for i, r in enumerate(rows_by_table.get(Table.MethodSpec, []), start=1):
+            mval, inst = r[0], r[1]
+            tag = mval & ((1 << mdor_bits) - 1)
+            mrow = mval >> mdor_bits
+            base = f"methodspec_{i}"
+            if tag < len(mdor_tables):
+                if mdor_tables[tag] == Table.MethodDef:
+                    m = self._method_by_token.get(0x06000000 | mrow)
+                    base = m.name if m else f"methoddef_{mrow}"
+                elif mdor_tables[tag] == Table.MemberRef:
+                    base = self._memberrefs.get(mrow, f"memberref_{mrow}")
+            # Instantiation blob: GENERICINST(0x0A) then argcount then Types.
+            b = get_blob(inst)
+            args = []
+            if b:
+                bp = 1 if b[0] == 0x0A else 0
+                argc, bp = read_compressed_uint(b, bp)
+                for _ in range(argc):
+                    a, bp = decode_type(b, bp)
+                    args.append(a)
+            self._methodspecs[i] = f"{base}<{', '.join(args)}>" if args else base
+
     # ---- lookups the architecture needs -----------------------------------
     def method_at_rva(self, rva):
         for m in self.methods:
@@ -377,7 +548,11 @@ class DotNetMetadata:
         if tbl == Table.TypeRef:
             return self._typerefs.get(row, f"typeref_{row}")
         if tbl == Table.TypeDef:
-            return f"typedef_{row}"
+            return self._typedefs.get(row, f"typedef_{row}")
+        if tbl == Table.TypeSpec:
+            return self._typespecs.get(row, f"typespec_{row}")
+        if tbl == Table.MethodSpec:
+            return self._methodspecs.get(row, f"methodspec_{row}")
         return f"token_{token:08x}"
 
     def _resolve_user_string(self, token):
