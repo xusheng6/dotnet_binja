@@ -225,6 +225,7 @@ class DotNetMetadata:
     _memberrefs: dict = field(default_factory=dict)  # row -> "Type::name"
     _fields: dict = field(default_factory=dict)      # row -> "Type::name"
     _methodspecs: dict = field(default_factory=dict)  # row -> "method<...>"
+    _field_rvas: dict = field(default_factory=dict)   # field row -> data RVA
     _us_off: int = 0
     _data: bytes = b""
 
@@ -465,6 +466,12 @@ class DotNetMetadata:
             fname = get_string(r[1])
             self._fields[i] = f"{tfull}::{fname}" if tfull else fname
 
+        # FieldRVA (0x1D): field row -> RVA of its initial data in the image.
+        # Cols: [RVA, Field]. Used for embedded constant blobs (array/span
+        # literals live in <PrivateImplementationDetails>).
+        for r in rows_by_table.get(0x1D, []):
+            self._field_rvas[r[1]] = r[0]
+
         # MethodDef -> Method (+ body header parse)
         for i, r in enumerate(methoddefs, start=1):
             rva = r[0]
@@ -520,6 +527,22 @@ class DotNetMetadata:
             if m.rva == rva:
                 return m
         return None
+
+    def _rva2off(self, rva):
+        for va, vsize, praw, sraw, _c in self.segments:
+            if va <= rva < va + max(vsize, sraw):
+                return praw + (rva - va)
+        return None
+
+    def field_data(self, field_row, length):
+        """Raw initial bytes of a static field with a FieldRVA (or None)."""
+        rva = self._field_rvas.get(field_row)
+        if rva is None:
+            return None
+        off = self._rva2off(rva)
+        if off is None:
+            return None
+        return self._data[off:off + length]
 
     def resolve_token_address(self, token):
         """
